@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>聯絡人清單</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f3f5f2;--surface:#fff;--ink:#1c2420;--muted:#66726b;--line:#dfe5e0;--accent:#1f6f5a;--accent-ink:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111815;--surface:#1b2420;--ink:#e8eee9;--muted:#93a199;--line:#2b3731;--accent:#4fc3a1;--accent-ink:#06231a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111815;--surface:#1b2420;--ink:#e8eee9;--muted:#93a199;--line:#2b3731;--accent:#4fc3a1;--accent-ink:#06231a;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+header{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:14px 14px 10px;z-index:5;border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:10}
+h1{font-size:20px;margin:0 0 10px;letter-spacing:.04em}
+.pick{display:flex;gap:8px;align-items:center}
+.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.sm{padding:6px 12px;font-size:14px;font-weight:500}
+#fname{color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+#file{display:none}
+#q{width:100%;margin-top:10px;padding:12px 14px;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px}
+#q:disabled{opacity:.5}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#count{padding:10px 16px 0;color:var(--muted);font-size:13px}
+main{padding:10px 14px 28px;display:grid;gap:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.name{font-size:18px;font-weight:700;margin-bottom:4px;overflow-wrap:anywhere}
+.row{display:flex;gap:8px;font-size:14px;color:var(--muted);padding:2px 0;overflow-wrap:anywhere}
+.row b{font-weight:500;flex:none;min-width:4em}
+.row span{color:var(--ink)}
+button.tel{margin:4px 8px 2px 0;padding:8px 14px;border:0;border-radius:999px;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer}
+.head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.share{flex:none;margin-top:2px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+.empty{text-align:center;color:var(--muted);padding:40px 16px}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;z-index:20}
+#sheet.on{display:flex}
+.panel{width:100%;background:var(--surface);border-radius:16px 16px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom,0px));display:grid;gap:10px}
+.panel .num{font-size:22px;font-weight:700;text-align:center}
+.panel .who{text-align:center;color:var(--muted);font-size:14px;margin-top:-6px}
+.panel .btn{padding:14px;font-size:17px;display:block}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:15px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:30}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+<h1>聯絡人清單</h1>
+<div class="pick"><button class="btn sm" id="btn" type="button">選擇檔案</button><span id="fname">支援 xlsx、csv，資料只存在這支手機</span><button class="btn sm ghost" id="clr" type="button" hidden>清除</button></div>
+<input id="file" type="file" accept=".xlsx,.xls,.csv">
+<input id="q" type="search" placeholder="搜尋姓名或號碼，不用打橫線" disabled autocomplete="off" inputmode="search">
+</header>
+<div id="count"></div>
+<main id="list"><div class="empty">先選擇檔案，第一欄會當成姓名。選過一次後下次不用再選。</div></main>
+<div id="sheet"><div class="panel"><div class="num" id="snum"></div><div class="who" id="swho"></div><a class="btn" id="scall" href="#">撥打</a><button class="btn ghost" id="scopy" type="button">複製號碼</button><button class="btn ghost" id="scancel" type="button">取消</button></div></div>
+<div id="toast"></div>
+<script>
+(function(){
+var KEY='contacts-v1',rows=[],head=[],fn='';
+var file=document.getElementById('file'),list=document.getElementById('list'),q=document.getElementById('q'),count=document.getElementById('count'),fname=document.getElementById('fname'),clr=document.getElementById('clr'),sheet=document.getElementById('sheet'),toast=document.getElementById('toast');
+document.getElementById('btn').onclick=function(){file.click()};
+function dig(s){return String(s).replace(/\D/g,'')}
+function phoneOf(v){
+  var s=String(v).trim();
+  if(!/^\+?[\d\s\-().]{6,20}$/.test(s))return null;
+  var d=dig(s);
+  if(s.charAt(0)==='+')return '+'+d;
+  if(d.length<6||d.length>15)return null;
+  if(/^9\d{8}$/.test(d)||/^[2-8]\d{7,8}$/.test(d))d='0'+d;
+  return d;
+}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function decode(buf){
+  try{return new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(e){return new TextDecoder('big5').decode(buf)}
+}
+function say(t){toast.textContent=t;toast.classList.add('on');setTimeout(function(){toast.classList.remove('on')},1800)}
+function build(cellsList){
+  return cellsList.map(function(cells){
+    return{name:cells[0]||'(無姓名)',cells:cells,text:cells.join(' ').toLowerCase(),digits:cells.map(dig).filter(Boolean)};
+  });
+}
+function show(){
+  q.disabled=false;q.value='';clr.hidden=false;fname.textContent=fn;render();
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify({fn:fn,head:head,rows:rows.map(function(r){return r.cells})}))}
+  catch(e){say('檔案太大，無法保存，下次需重選')}
+}
+function load(){
+  try{
+    var d=JSON.parse(localStorage.getItem(KEY)||'null');
+    if(d&&d.rows&&d.rows.length){fn=d.fn||'已保存的清單';head=d.head||[];rows=build(d.rows);show()}
+  }catch(e){}
+}
+file.onchange=function(){
+  var f=file.files[0];if(!f)return;
+  var r=new FileReader();
+  r.onerror=function(){list.innerHTML='<div class="empty">讀取失敗，請換一個檔案再試</div>'};
+  r.onload=function(){
+    try{
+      var wb=/\.csv$/i.test(f.name)?XLSX.read(decode(r.result),{type:'string'}):XLSX.read(r.result,{type:'array'});
+      var data=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:'',blankrows:false});
+      data=data.filter(function(r){return r.some(function(c){return String(c).trim()!==''})});
+      if(!data.length)throw new Error('empty');
+      var first=data[0],hasHeader=!first.slice(1).some(function(c){return phoneOf(c)});
+      head=hasHeader?first.map(String):[];
+      rows=build((hasHeader?data.slice(1):data).map(function(r){return r.map(function(c){return String(c).trim()})}));
+      fn=f.name;show();save();
+    }catch(e){list.innerHTML='<div class="empty">無法解析這個檔案，請確認是 xlsx 或 csv</div>'}
+    file.value='';
+  };
+  r.readAsArrayBuffer(f);
+};
+clr.onclick=function(){
+  if(!confirm('清除已保存的聯絡人資料？'))return;
+  try{localStorage.removeItem(KEY)}catch(e){}
+  rows=[];head=[];fn='';q.disabled=true;q.value='';clr.hidden=true;count.textContent='';
+  fname.textContent='支援 xlsx、csv，資料只存在這支手機';
+  list.innerHTML='<div class="empty">先選擇檔案，第一欄會當成姓名。選過一次後下次不用再選。</div>';
+};
+function match(r,s){
+  if(!s)return true;
+  var t=s.toLowerCase();
+  if(r.text.indexOf(t)>-1)return true;
+  if(/^[\d\s\-()+.]+$/.test(s)){var d=dig(s);return d&&r.digits.some(function(x){return x.indexOf(d)>-1})}
+  return false;
+}
+function card(r,idx){
+  var tels='',rest='';
+  r.cells.forEach(function(c,i){
+    if(i===0||c==='')return;
+    var p=phoneOf(c),label=head[i]?esc(head[i]):'';
+    if(p)tels+='<button class="tel" type="button" data-i="'+idx+'" data-p="'+p+'">'+esc(c)+'</button>';
+    else rest+='<div class="row">'+(label?'<b>'+label+'</b>':'')+'<span>'+esc(c)+'</span></div>';
+  });
+  return '<div class="card"><div class="head"><div class="name">'+esc(r.name)+'</div><button class="share" type="button" data-i="'+idx+'">分享</button></div>'+tels+rest+'</div>';
+}
+function render(){
+  var s=q.value.trim(),m=rows.filter(function(r){return match(r,s)});
+  count.textContent=m.length+' / '+rows.length+' 筆';
+  list.innerHTML=m.length?m.slice(0,200).map(function(r){return card(r,rows.indexOf(r))}).join(''):'<div class="empty">找不到符合的聯絡人</div>';
+}
+q.addEventListener('input',render);
+function copyText(t,msg){
+  function fb(){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}document.body.removeChild(a);say(ok?msg:'複製失敗')}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){say(msg)},fb)}else fb();
+}
+var cur='';
+list.addEventListener('click',function(e){
+  var sh=e.target.closest('button.share');
+  if(sh){var rr=rows[+sh.getAttribute('data-i')],ps=[];rr.cells.forEach(function(c,i){if(i>0){var p=phoneOf(c);if(p)ps.push(p)}});copyText(rr.name+(ps.length?' '+ps.join(' / '):''),'已複製姓名與電話');return}
+  var b=e.target.closest('button.tel');if(!b)return;
+  cur=b.getAttribute('data-p');
+  document.getElementById('snum').textContent=b.textContent.replace(/（.*）$/,'');
+  document.getElementById('swho').textContent=rows[+b.getAttribute('data-i')].name;
+  document.getElementById('scall').setAttribute('href','tel:'+cur);
+  sheet.classList.add('on');
+});
+function close(){sheet.classList.remove('on')}
+document.getElementById('scancel').onclick=close;
+sheet.addEventListener('click',function(e){if(e.target===sheet)close()});
+document.getElementById('scall').addEventListener('click',function(){setTimeout(close,300)});
+document.getElementById('scopy').onclick=function(){
+  function fallback(){
+    var t=document.createElement('textarea');t.value=cur;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();
+    var ok=false;try{ok=document.execCommand('copy')}catch(e){}
+    document.body.removeChild(t);say(ok?'已複製':'複製失敗');
+  }
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(cur).then(function(){say('已複製')},fallback)}else fallback();
+  close();
+};
+load();
+})();
+</script>
+</body>
+</html>
